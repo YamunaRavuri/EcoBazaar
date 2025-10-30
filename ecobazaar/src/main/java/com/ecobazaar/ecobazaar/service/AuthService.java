@@ -1,115 +1,66 @@
-
 package com.ecobazaar.ecobazaar.service;
 
+import com.ecobazaar.ecobazaar.dto.LoginRequest;
+import com.ecobazaar.ecobazaar.dto.RegisterRequest;
+import com.ecobazaar.ecobazaar.dto.UserResponse;
+import com.ecobazaar.ecobazaar.model.User;
+import com.ecobazaar.ecobazaar.repository.UserRepository;
+import com.ecobazaar.ecobazaar.util.JwtUtil;
 
-import java.util.Optional;
-
-
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-
-import com.ecobazaar.ecobazaar.dto.*;
-
-import com.ecobazaar.ecobazaar.model.User;
-
-import com.ecobazaar.ecobazaar.repository.UserRepository;
-
-
-import lombok.RequiredArgsConstructor;
-
-
 @Service
-
 public class AuthService {
 
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
 
-private final UserRepository userRepository;
+    public AuthService(UserRepository userRepository,
+                       PasswordEncoder passwordEncoder,
+                       JwtUtil jwtUtil) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.jwtUtil = jwtUtil;
+    }
 
+    // ✅ Register new user
+    public UserResponse register(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already exists!");
+        }
 
-public AuthService(UserRepository userRepository) {
+        // Default role = ROLE_USER
+        String role = request.getRole() == null ? "ROLE_USER" : "ROLE_" + request.getRole().toUpperCase();
 
-this.userRepository = userRepository;
+        if (role.equals("ROLE_ADMIN")) {
+            throw new RuntimeException("Cannot self-register as admin!");
+        }
 
-}
+        User user = new User();
+        user.setName(request.getName());
+        user.setEmail(request.getEmail());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setRole(role);
+        user.setEcoScore(0);
 
+        User saved = userRepository.save(user);
 
+        return new UserResponse(saved.getId(), saved.getName(), saved.getEmail(), saved.getRole(), 0, null);
+    }
 
-public UserResponse register(RegisterRequest request) {
+    // ✅ Login user
+    public UserResponse login(LoginRequest login) {
+        User user = userRepository.findByEmail(login.getEmail())
+                .orElseThrow(() -> new RuntimeException("User not found!"));
 
+        if (!passwordEncoder.matches(login.getPassword(), user.getPassword())) {
+            throw new RuntimeException("Invalid credentials!");
+        }
 
-Optional<User> existing = userRepository.findByEmail(request.getEmail());
+        String token = jwtUtil.generateToken(user.getEmail(), user.getRole(), user.getId());
 
-if (existing.isPresent()) {
-
-throw new RuntimeException("Email already taken");
-
-}
-
-
-
-User user = new User();
-
-user.setName(request.getName());
-
-user.setEmail(request.getEmail());
-
-user.setPassword(request.getPassword());
-
-
-
-user.setRole("CUSTOMER");
-
-user.setEcoScore(0);
-
-
-userRepository.save(user);
-
-
-return new UserResponse(
-
-user.getId(),
-
-user.getName(),
-
-user.getEmail(),
-
-user.getRole(),
-
-user.getEcoScore()
-
-);
-
-}
-
-
-
-public UserResponse login(LoginRequest request) {
-
-User user = userRepository.findByEmail(request.getEmail())
-
-.orElseThrow(() -> new RuntimeException("User not found"));
-
-
-if (!user.getPassword().equals(request.getPassword())) {
-
-throw new RuntimeException("Invalid password");
-
-}
-
-
-return new UserResponse(
-
-user.getId(),
-
-user.getName(),
-
-user.getEmail(),
-user.getRole(),
-
-user.getEcoScore()
-
-);
-
-}
-
+        return new UserResponse(user.getId(), user.getName(), user.getEmail(), user.getRole(), user.getEcoScore(), token);
+    }
 }
